@@ -17,6 +17,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.RelativeLayout
 import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -27,7 +28,7 @@ import com.sea.quickstart.R
 import com.sea.quickstart.service.TouchHelperService
 
 
-class PermissionActivity : FragmentActivity() {
+class PermissionActivity : AppCompatActivity() {
 
     private lateinit var adapter: ItemAdapter
 
@@ -55,10 +56,10 @@ class PermissionActivity : FragmentActivity() {
         private lateinit var permission: PermissionCollection
 
         private val permissionList: List<Permission> = listOf(
-            Permission("读写权限", false),
-            Permission("允许使用悬浮窗", false),
-            Permission("辅助功能", false),
-            Permission("电池优化", false)
+            Permission("读写权限", Permission.State.DENIED),
+            Permission("允许使用悬浮窗", Permission.State.DENIED),
+            Permission("辅助功能", Permission.State.DENIED),
+            Permission("电池优化")
         )
 
         class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -73,7 +74,7 @@ class PermissionActivity : FragmentActivity() {
                 LayoutInflater.from(parent.context).inflate(R.layout.item_permission, parent, false)
             val holder = ViewHolder(view)
             holder.rlContainer.setOnClickListener {
-                if (permissionList[holder.adapterPosition].isGrant) {
+                if (permissionList[holder.adapterPosition].state == Permission.State.GRANTED) {
                     return@setOnClickListener
                 }
                 when (holder.adapterPosition) {
@@ -108,10 +109,9 @@ class PermissionActivity : FragmentActivity() {
             if (position == 3) {
                 return;
             }
-            if (permissionList[position].isGrant) {
-                holder.tvDesc.text = "已授权"
-            } else {
-                holder.tvDesc.text = "未授权"
+            when (permissionList[position].state) {
+                Permission.State.GRANTED -> holder.tvDesc.text = "已授权"
+                Permission.State.DENIED -> holder.tvDesc.text = "未授权"
             }
         }
 
@@ -119,17 +119,30 @@ class PermissionActivity : FragmentActivity() {
 
         fun loadPermissionsState() {
             //判断sd卡读写权限
-            permissionList[0].isGrant = ContextCompat.checkSelfPermission(
-                activity,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE
-            ) == PackageManager.PERMISSION_GRANTED
+            if (ContextCompat.checkSelfPermission(
+                    activity,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionList[0].state == Permission.State.GRANTED
+            } else {
+                permissionList[0].state == Permission.State.DENIED
+            }
             //判断悬浮窗权限
-            permissionList[1].isGrant = canDrawOverlays(activity)
+            if (canDrawOverlays(activity)) {
+                permissionList[1].state = Permission.State.GRANTED
+            } else {
+                permissionList[1].state == Permission.State.DENIED
+            }
             //判断辅助功能权限
-            permissionList[2].isGrant = isAccessibilitySettingsOn(activity)
+            if (isAccessibilitySettingsOn(activity)) {
+                permissionList[2].state = Permission.State.GRANTED
+            } else {
+                permissionList[2].state == Permission.State.DENIED
+            }
         }
 
-        fun canDrawOverlays(context: Context): Boolean {
+        private fun canDrawOverlays(context: Context): Boolean {
             return if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) true else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                 Settings.canDrawOverlays(context)
             } else {
@@ -187,8 +200,14 @@ class PermissionActivity : FragmentActivity() {
         }
     }
 
-    class Permission constructor(title: String, isGrant: Boolean) {
+    class Permission constructor(title: String, state: State = State.DEFAULT) {
         var title: String = title
-        var isGrant: Boolean = isGrant
+        var state: State = state
+
+        enum class State {
+            DEFAULT,
+            GRANTED,
+            DENIED
+        }
     }
 }
