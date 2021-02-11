@@ -3,26 +3,33 @@ package com.sea.quickstart.activity
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.PixelFormat
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.provider.Settings.SettingNotFoundException
+import android.text.TextUtils.SimpleStringSplitter
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.RelativeLayout
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.permissionx.guolindev.PermissionCollection
 import com.permissionx.guolindev.PermissionX
 import com.sea.quickstart.R
+import com.sea.quickstart.service.TouchHelperService
 
 
 class PermissionActivity : FragmentActivity() {
+
+    private lateinit var adapter: ItemAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,11 +39,14 @@ class PermissionActivity : FragmentActivity() {
         val layoutManager = LinearLayoutManager(this)
         layoutManager.orientation = LinearLayoutManager.VERTICAL
         rvList.layoutManager = layoutManager
-        rvList.adapter = ItemAdapter(this)
+        adapter = ItemAdapter(this)
+        rvList.adapter = adapter
     }
 
     override fun onResume() {
         super.onResume()
+        adapter.loadPermissionsState()
+        adapter.notifyDataSetChanged()
     }
 
     class ItemAdapter(activity: FragmentActivity) : RecyclerView.Adapter<ItemAdapter.ViewHolder>() {
@@ -45,9 +55,10 @@ class PermissionActivity : FragmentActivity() {
         private lateinit var permission: PermissionCollection
 
         private val permissionList: List<Permission> = listOf(
-            Permission("读写权限", ""),
-            Permission("允许使用悬浮窗", ""),
-            Permission("辅助功能", "")
+            Permission("读写权限", false),
+            Permission("允许使用悬浮窗", false),
+            Permission("辅助功能", false),
+            Permission("电池优化", false)
         )
 
         class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -62,6 +73,9 @@ class PermissionActivity : FragmentActivity() {
                 LayoutInflater.from(parent.context).inflate(R.layout.item_permission, parent, false)
             val holder = ViewHolder(view)
             holder.rlContainer.setOnClickListener {
+                if (permissionList[holder.adapterPosition].isGrant) {
+                    return@setOnClickListener
+                }
                 when (holder.adapterPosition) {
                     0 -> {
                         permission.permissions(
@@ -69,28 +83,51 @@ class PermissionActivity : FragmentActivity() {
                         ).request(null)
                     }
                     1 -> {
-                        if (!canDrawOverlays(activity)) {
-                            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
-                            intent.data = Uri.parse("package:" + activity.packageName)
-                            activity.startActivityForResult(intent, 0)
-                        }
+                        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                        intent.data = Uri.parse("package:" + activity.packageName)
+                        activity.startActivityForResult(intent, 0)
                     }
                     2 -> {
                         val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         activity.startActivity(intent)
                     }
+                    3 -> {
+                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                        intent.data = Uri.parse("package:" + activity.packageName)
+                        activity.startActivity(intent)
+                    }
                 }
             }
+            loadPermissionsState()
             return holder
         }
 
         override fun onBindViewHolder(holder: ViewHolder, position: Int) {
             holder.tvTitle.text = permissionList[position].title
-            holder.tvDesc.text = permissionList[position].desc
+            if (position == 3) {
+                return;
+            }
+            if (permissionList[position].isGrant) {
+                holder.tvDesc.text = "已授权"
+            } else {
+                holder.tvDesc.text = "未授权"
+            }
         }
 
         override fun getItemCount() = permissionList.size
+
+        fun loadPermissionsState() {
+            //判断sd卡读写权限
+            permissionList[0].isGrant = ContextCompat.checkSelfPermission(
+                activity,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+            //判断悬浮窗权限
+            permissionList[1].isGrant = canDrawOverlays(activity)
+            //判断辅助功能权限
+            permissionList[2].isGrant = isAccessibilitySettingsOn(activity)
+        }
 
         fun canDrawOverlays(context: Context): Boolean {
             return if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) true else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -117,10 +154,41 @@ class PermissionActivity : FragmentActivity() {
                 false
             }
         }
+
+        private fun isAccessibilitySettingsOn(mContext: Context): Boolean {
+            var accessibilityEnabled = 0
+            val service: String =
+                mContext.packageName + "/" + TouchHelperService::class.java.canonicalName
+            try {
+                accessibilityEnabled = Settings.Secure.getInt(
+                    mContext.applicationContext.contentResolver,
+                    Settings.Secure.ACCESSIBILITY_ENABLED
+                )
+            } catch (e: SettingNotFoundException) {
+                e.printStackTrace()
+            }
+            val mStringColonSplitter = SimpleStringSplitter(':')
+            if (accessibilityEnabled == 1) {
+                val settingValue = Settings.Secure.getString(
+                    mContext.applicationContext.contentResolver,
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+                )
+                if (settingValue != null) {
+                    mStringColonSplitter.setString(settingValue)
+                    while (mStringColonSplitter.hasNext()) {
+                        val accessibilityService = mStringColonSplitter.next()
+                        if (accessibilityService.equals(service, ignoreCase = true)) {
+                            return true
+                        }
+                    }
+                }
+            }
+            return false
+        }
     }
 
-    class Permission constructor(title: String, desc: String) {
+    class Permission constructor(title: String, isGrant: Boolean) {
         var title: String = title
-        var desc: String = desc
+        var isGrant: Boolean = isGrant
     }
 }
