@@ -1,6 +1,8 @@
 package com.sea.quickstart.activity
 
 import android.Manifest
+import android.app.ActivityManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -25,6 +27,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.permissionx.guolindev.PermissionCollection
 import com.permissionx.guolindev.PermissionX
 import com.sea.quickstart.R
+import com.sea.quickstart.helper.SpHelper
 import com.sea.quickstart.service.TouchHelperService
 
 
@@ -56,10 +59,12 @@ class PermissionActivity : AppCompatActivity() {
         private lateinit var permission: PermissionCollection
 
         private val permissionList: List<Permission> = listOf(
-            Permission("读写权限", Permission.State.DENIED),
-            Permission("允许使用悬浮窗", Permission.State.DENIED),
-            Permission("辅助功能", Permission.State.DENIED),
-            Permission("电池优化")
+            Permission("读写权限", "", Permission.State.DENIED),
+            Permission("允许使用悬浮窗", "", Permission.State.DENIED),
+            Permission("辅助功能", "", Permission.State.DENIED),
+            Permission("电池优化"),
+            Permission("隐藏最近任务列表"),
+            Permission("自启动管理")
         )
 
         class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
@@ -98,6 +103,29 @@ class PermissionActivity : AppCompatActivity() {
                         intent.data = Uri.parse("package:" + activity.packageName)
                         activity.startActivity(intent)
                     }
+                    4 -> {
+                        val am =
+                            activity.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                        am?.let {
+                            val tasks = it.appTasks
+                            if (tasks.isNullOrEmpty()) {
+                                return@let
+                            }
+                            val flag = SpHelper.get(activity, "excludeRecent")
+                            if (flag == "1") {
+                                tasks[0].setExcludeFromRecents(false)
+                                SpHelper.put(activity, "excludeRecent", "0")
+                            } else {
+                                tasks[0].setExcludeFromRecents(true)
+                                SpHelper.put(activity, "excludeRecent", "1")
+                            }
+                            loadPermissionsState()
+                            notifyDataSetChanged()
+                        }
+                    }
+                    5 -> {
+                        jumpStartInterface(activity)
+                    }
                 }
             }
             loadPermissionsState()
@@ -112,6 +140,9 @@ class PermissionActivity : AppCompatActivity() {
             when (permissionList[position].state) {
                 Permission.State.GRANTED -> holder.tvDesc.text = "已授权"
                 Permission.State.DENIED -> holder.tvDesc.text = "未授权"
+            }
+            if (permissionList[position].desc.isNotEmpty()) {
+                holder.tvDesc.text = permissionList[position].desc
             }
         }
 
@@ -139,6 +170,13 @@ class PermissionActivity : AppCompatActivity() {
                 permissionList[2].state = Permission.State.GRANTED
             } else {
                 permissionList[2].state == Permission.State.DENIED
+            }
+            //更新隐藏状态
+            val flag = SpHelper.get(activity, "excludeRecent")
+            if (flag == "1") {
+                permissionList[4].desc = "已隐藏"
+            } else {
+                permissionList[4].desc = "未隐藏"
             }
         }
 
@@ -198,10 +236,79 @@ class PermissionActivity : AppCompatActivity() {
             }
             return false
         }
+
+        private fun getMobileType(): String {
+            return Build.MANUFACTURER
+        }
+
+        private fun jumpStartInterface(context: Context) {
+            var intent = Intent()
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                var componentName: ComponentName? = null
+                if (getMobileType() == "Xiaomi") { // 红米Note4测试通过
+                    componentName = ComponentName(
+                        "com.miui.securitycenter",
+                        "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                    )
+                } else if (getMobileType() == "Letv") { // 乐视2测试通过
+                    intent.action = "com.letv.android.permissionautoboot"
+                } else if (getMobileType() == "samsung") { // 三星Note5测试通过
+                    componentName = ComponentName(
+                        "com.samsung.android.sm_cn",
+                        "com.samsung.android.sm.ui.ram.AutoRunActivity"
+                    )
+                } else if (getMobileType() == "HUAWEI") { // 华为测试通过
+                    componentName =
+                        ComponentName.unflattenFromString("com.huawei.systemmanager/.startupmgr.ui.StartupNormalAppListActivity") //跳自启动管理
+                    //SettingOverlayView.show(context);
+                } else if (getMobileType() == "vivo") { // VIVO测试通过
+                    componentName =
+                        ComponentName.unflattenFromString("com.iqoo.secure/.safeguard.PurviewTabActivity")
+                } else if (getMobileType() == "Meizu") { //万恶的魅族
+                    // 通过测试，发现魅族是真恶心，也是够了，之前版本还能查看到关于设置自启动这一界面，系统更新之后，完全找不到了，心里默默Fuck！
+                    // 针对魅族，我们只能通过魅族内置手机管家去设置自启动，所以我在这里直接跳转到魅族内置手机管家界面，具体结果请看图
+                    componentName =
+                        ComponentName.unflattenFromString("com.meizu.safe/.permission.PermissionMainActivity")
+                } else if (getMobileType() == "OPPO") { // OPPO R8205测试通过
+                    componentName =
+                        ComponentName.unflattenFromString("com.oppo.safe/.permission.startup.StartupAppListActivity")
+                } else if (getMobileType() == "ulong") { // 360手机 未测试
+                    componentName = ComponentName(
+                        "com.yulong.android.coolsafe",
+                        ".ui.activity.autorun.AutoRunListActivity"
+                    )
+                } else {
+                    // 以上只是市面上主流机型，由于公司你懂的，所以很不容易才凑齐以上设备
+                    // 针对于其他设备，我们只能调整当前系统app查看详情界面
+                    // 在此根据用户手机当前版本跳转系统设置界面
+                    if (Build.VERSION.SDK_INT >= 9) {
+                        intent.action = "android.settings.APPLICATION_DETAILS_SETTINGS"
+                        intent.data = Uri.fromParts("package", context.packageName, null)
+                    } else if (Build.VERSION.SDK_INT <= 8) {
+                        intent.action = Intent.ACTION_VIEW
+                        intent.setClassName(
+                            "com.android.settings",
+                            "com.android.settings.InstalledAppDetails"
+                        )
+                        intent.putExtra(
+                            "com.android.settings.ApplicationPkgName",
+                            context.packageName
+                        )
+                    }
+                }
+                intent.component = componentName
+                context.startActivity(intent)
+            } catch (e: java.lang.Exception) { //抛出异常就直接打开设置页面
+                intent = Intent(Settings.ACTION_SETTINGS)
+                context.startActivity(intent)
+            }
+        }
     }
 
-    class Permission constructor(title: String, state: State = State.DEFAULT) {
+    class Permission constructor(title: String, desc: String = "", state: State = State.DEFAULT) {
         var title: String = title
+        var desc: String = desc
         var state: State = state
 
         enum class State {
